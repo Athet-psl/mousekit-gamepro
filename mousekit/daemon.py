@@ -29,6 +29,23 @@ log = logging.getLogger("mousekit")
 SCAN_INTERVAL = 2.0
 
 
+class Held(Exception):
+    """A button or key of the device was down, so it wasn't grabbed."""
+
+
+def grab_released(dev):
+    """Grab `dev` unless one of its buttons or keys is down; then raise Held.
+
+    A press that reached KDE before the grab never gets its release: KDE keeps
+    the button held (a stuck drag, clicks do nothing) until the mouse is
+    replugged. So a device in use is left alone until a scan finds it released.
+    """
+    dev.grab()
+    if dev.active_keys():
+        dev.ungrab()
+        raise Held
+
+
 class Mirror:
     """The uinput twin of a grabbed mouse."""
 
@@ -126,8 +143,12 @@ class KeyInterface:
         self.node = node
         self.daemon = daemon
         self.dev = evdev.InputDevice(node)
-        self.mirror = evdev.UInput.from_device(self.dev, name=f"{devices.VIRTUAL_PREFIX}: {self.dev.name.strip()}")
-        self.dev.grab()
+        try:
+            grab_released(self.dev)
+            self.mirror = evdev.UInput.from_device(self.dev, name=f"{devices.VIRTUAL_PREFIX}: {self.dev.name.strip()}")
+        except (Held, OSError):
+            self.dev.close()  # also ends the grab
+            raise
         self.pressed = {}  # key code -> action taken over at press (None: passed through)
 
     def fileno(self):
@@ -314,6 +335,8 @@ class Daemon:
                 continue
             try:
                 iface = KeyInterface(key, node, self)
+            except Held:
+                continue  # taken at a later scan, once released
             except OSError as err:
                 log.warning("cannot take the keys of %s (%s): %s", key, node, err)
                 continue
@@ -415,9 +438,17 @@ class Daemon:
     def grab(self, info):
         try:
             dev = evdev.InputDevice(info.node)
-            mirror = Mirror(dev)
-            dev.grab()
         except OSError as err:
+            log.warning("cannot manage %s (%s): %s", info.name, info.node, err)
+            return False
+        try:
+            grab_released(dev)
+            mirror = Mirror(dev)
+        except Held:
+            dev.close()
+            return False  # grabbed at a later scan, once released
+        except OSError as err:
+            dev.close()  # also ends the grab
             log.warning("cannot manage %s (%s): %s", info.name, info.node, err)
             return False
         engine = Engine(mirror, self.actions, self.broadcast, info.key)
