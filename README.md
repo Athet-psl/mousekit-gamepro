@@ -26,6 +26,7 @@ Every other mouse gets button remapping and gestures. To get yours supported, se
 - DPI: six stages from 200 to 12800. Turn stages on and off and choose the current one.
 - Hardware buttons: give the DPI buttons any action (switching desktops by default), and Fire and Forward too.
 - Saved to the mouse: lighting, DPI and buttons stay without Mousekit, on any computer.
+- Backups: save everything stored in the mouse to a file and put it back whenever you like.
 - A picture of the mouse that shows its lighting and the buttons you press.
 
 **Any mouse**
@@ -42,17 +43,19 @@ Every other mouse gets button remapping and gestures. To get yours supported, se
 ## Install
 
 Download `mousekit_…_all.deb` from [Releases](https://github.com/Athet-psl/mousekit-gamepro/releases/latest)
-and install it:
+and open it: on Kubuntu a double click opens it in Discover, where you press **Install**. Or from a terminal:
 
 ```sh
 sudo apt install ./mousekit_*_all.deb
 ```
 
+Either way, the packages Mousekit needs are installed with it.
+
 Open **Mousekit for GamePro** from the app menu. If the service isn't running yet, press **Start** at the
 bottom left. Then turn on **Manage this mouse** on the Device tab.
 
-Mousekit is developed on Kubuntu 26.10 with Plasma 6.7 and needs Plasma 6. apt installs the rest
-(`python3-evdev`, `python3-pyqt6`, `python3-dbus`). Other desktops aren't supported yet, see
+Mousekit is developed on Kubuntu 26.10 with Plasma 6.7 and needs Plasma 6 (the rest, `python3-evdev`,
+`python3-pyqt6` and `python3-dbus`, comes with the package). Other desktops aren't supported yet, see
 [Issues and requests](#issues-and-requests).
 
 **Updates:** the service checks for a new release every hour and shows a notification. **About** (bottom
@@ -99,7 +102,8 @@ that, but nothing is saved to them until their model is verified.
   `~/.config/mousekit/config.json`.
 - Access to the mice comes from udev `uaccess` rules for the logged-in user, so neither the `input` group
   nor root is needed.
-- Every write to the mouse's memory is read back and checked before it's saved.
+- Every write to the mouse's memory is read back and checked before it's saved, and the mouse is backed up
+  before Mousekit's first change to it.
 
 ## Issues and requests
 
@@ -119,11 +123,19 @@ Every push to `main` runs the tests, builds the .deb and publishes it as release
 release notes are the messages of the commits since the previous release, and the app shows them as the
 changelog.
 
+## Back up, then experiment
+
+**Device** › **Back up…** saves the settings stored in the mouse (lighting, DPI, buttons: everything
+Mousekit can change) to a file, and **Restore…** puts the mouse back as it was. Before its first change to a
+mouse, Mousekit also keeps a backup of it in `~/.local/share/mousekit/backups`. Every write to the mouse is
+read back and checked before it's saved, and a backup of another model is refused.
+
+So back up, then try whatever you like.
+
 ## Disclaimer
 
 Not affiliated with or endorsed by GamePro. The protocol was worked out from the official app for
-interoperability. Writing to a mouse's memory is at your own risk. Mousekit checks every write, and turning
-off the DPI-button switch puts the factory assignment back.
+interoperability. Mousekit comes without warranty, see the [license](LICENSE).
 
 The product image of the GM500W belongs to GamePro.
 

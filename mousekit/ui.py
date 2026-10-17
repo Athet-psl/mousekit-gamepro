@@ -24,11 +24,11 @@ from PyQt6.QtNetwork import QLocalSocket, QNetworkAccessManager, QNetworkReply, 
 from PyQt6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMainWindow,
-    QMenu, QPlainTextEdit, QPushButton, QScrollArea, QSlider, QStackedWidget, QTextBrowser, QTreeWidget,
+    QMenu, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSlider, QStackedWidget, QTextBrowser, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import __author__, __version__, config, devices, dump, effects, models, updates, vendor
+from . import __author__, __version__, backups, config, devices, dump, effects, models, updates, vendor
 from .drawing import LED_MODES, SINGLE_COLOUR_MODES, Lighting, art_for
 from .config import DEFAULT_ACTION, LOCKED_BUTTONS, SWIPE_DIRECTIONS, WHEEL_DIRECTIONS
 from .keys import parse_combo
@@ -625,6 +625,8 @@ class VendorChannel(QObject):
 
     def _call(self, func, *args):
         """func(fd, *args), reopening once if the mouse was replugged since."""
+        if func in vendor.SAVES:
+            self._backup_first()
         for _ in range(2):
             if self.fd is None and not self._reopen():
                 raise OSError("the mouse is not connected")
@@ -633,6 +635,12 @@ class VendorChannel(QObject):
             except OSError:
                 self._close()
         raise OSError("the mouse is not responding")
+
+    def _backup_first(self):
+        """Keep the mouse's settings from before Mousekit's first change to it."""
+        path = backups.first_path(self.key)
+        if not path.exists():
+            backups.save(path, backups.make(self.key, self._call(vendor.read_settings)))
 
     def label(self):
         if self.stage is None:
@@ -1199,6 +1207,9 @@ class DeviceTab(QWidget):
     def __init__(self, info, profile, app, dpi=None, hw=None):
         super().__init__()
         self.profile = profile
+        self.info = info
+        self.app = app
+        self.dpi = dpi
         main = SettingsPanel()
         self.name_edit = QLineEdit(profile.get("label", ""))
         self.name_edit.setPlaceholderText(models.display_name(info.key, info.name))
@@ -1219,7 +1230,7 @@ class DeviceTab(QWidget):
             self.dpi_switch.setChecked(bool(hw.get("dpi_keys")))
             self.dpi_switch.toggled.connect(self.dpi_buttons.emit)
             self.replug_note = QLabel(f'<span style="color:{app.theme.orange}">●</span>&nbsp;'
-                                      "Replug the mouse: the new DPI button assignment takes effect after that.")
+                                      "Replug the mouse: the new button settings take effect after that.")
             self.replug_note.setWordWrap(True)
             self.replug_note.hide()
             buttons.add_row("DPI buttons are set in Mousekit",
@@ -1229,6 +1240,21 @@ class DeviceTab(QWidget):
                             "Turn it off to go back.",
                             self.dpi_switch, below=self.replug_note)
             panels.append(buttons)
+        if dpi is not None and dpi.verified:
+            backup = SettingsPanel()
+            save = QPushButton("Back up…")
+            restore = QPushButton("Restore…")
+            for button, slot in ((save, self._backup), (restore, self._restore)):
+                button.setObjectName("outline")
+                button.setCursor(Qt.CursorShape.PointingHandCursor)
+                button.clicked.connect(slot)
+            backup.add_row("Back up the mouse",
+                           "Saves the settings stored in the mouse (lighting, DPI, buttons) to a file. "
+                           "Back up, then experiment.", save)
+            backup.add_row("Restore from a backup",
+                           "Puts the mouse back as it was in a backup. Mousekit also keeps one from before "
+                           f"its first change to this mouse, in {str(backups.BACKUP_DIR).replace(str(Path.home()), '~', 1)}.", restore)
+            panels.append(backup)
         if not info.accessible:
             access = SettingsPanel()
             cmd = QLineEdit(UDEV_HINT)
@@ -1261,6 +1287,55 @@ class DeviceTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(centered_scroll(*panels))
+
+    def _backup(self):
+        default = str(Path.home() / backups.default_name(self.info.key))
+        path, _ = QFileDialog.getSaveFileName(self, "Back up the mouse", default, "Mousekit backups (*.json)")
+        if not path:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            backups.save(path, backups.make(self.info.key, self.dpi._call(vendor.read_settings)))
+        except OSError as err:
+            self.app.footer.show_event(f"Couldn't back up the mouse: {err}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        self.app.footer.show_event(f"Backed up to {path}")
+
+    def _restore(self):
+        start = backups.BACKUP_DIR if backups.BACKUP_DIR.exists() else Path.home()
+        path, _ = QFileDialog.getOpenFileName(self, "Restore the mouse", str(start), "Mousekit backups (*.json)")
+        if not path:
+            return
+        try:
+            backup = backups.load(path, self.info.key, vendor.SETTINGS_SIZE)
+        except ValueError as err:
+            QMessageBox.warning(self, "Restore the mouse", f"Can't restore it: {err}.")
+            return
+        when = backup.get("created", "").replace("T", " ")[:16]
+        answer = QMessageBox.question(
+            self, "Restore the mouse", f"Put the mouse back as it was on {when}?\n\n"
+            "The lighting, DPI and buttons stored in the mouse are replaced with the backup's.")
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            changed = self.dpi._call(vendor.restore_settings, backup["data"])
+        except (OSError, ValueError) as err:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Restore the mouse", f"Couldn't restore it: {err}.")
+            return
+        QApplication.restoreOverrideCursor()
+        if not changed:
+            self.app.footer.show_event("The mouse already matches this backup")
+            return
+        app = self.app
+        page = app.reload_device(self.info.key, show_device_tab=True)  # this tab is replaced
+        note = getattr(page.device_tab, "replug_note", None) if page else None
+        if note is not None:
+            note.show()
+        app.footer.show_event("Restored. Replug the mouse for the button settings to take effect")
 
     def _renamed(self):
         self.profile["label"] = self.name_edit.text().strip()
@@ -1939,6 +2014,22 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(page)
         page.set_state(*self._state(key))
         self.stack.setCurrentWidget(page)
+
+    def reload_device(self, key, show_device_tab=False):
+        """Rebuild a mouse's page from what's in the mouse now."""
+        old = self.pages.pop(key, None)
+        if old is not None:
+            if old.dpi is not None:
+                old.dpi._close()
+            self.stack.removeWidget(old)
+            old.deleteLater()
+        self.open_device(key)
+        page = self.pages.get(key)
+        if page is not None and show_device_tab:
+            index = page.stack.indexOf(page.device_tab)
+            page.tabs.group.button(index).setChecked(True)
+            page.stack.setCurrentIndex(index)
+        return page
 
     def _changed(self):
         self._update_states()

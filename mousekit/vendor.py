@@ -384,3 +384,45 @@ def parse_input(report):
     if report[2] & 0x80:
         return "dpi-set", button, report[2] & 0x7F
     return "dpi-press", button, report[2]
+
+
+# Backups
+
+SETTINGS_SIZE = 0x100  # the settings area: everything Mousekit writes (macros at 0x400+ are left alone)
+
+
+def read_settings(fd, attempts=3):
+    """The whole settings area. Read twice and compared, so live lighting traffic can't slip into it."""
+    def area():
+        return b"".join(read_register(fd, address, 8) for address in range(0, SETTINGS_SIZE, 8))
+
+    for _ in range(attempts):
+        first = area()
+        if area() == first:
+            return first
+    raise OSError("the mouse gave different answers each time; try again")
+
+
+def restore_settings(fd, data):
+    """Write a backed-up settings area back, only the blocks that differ, check it and save it.
+
+    Returns how many 8-byte blocks changed. Refuses a backup whose header (model ids) doesn't match.
+    """
+    if len(data) != SETTINGS_SIZE:
+        raise ValueError("the backup has the wrong size")
+    current = read_settings(fd)
+    if data[:8] != current[:8]:
+        raise ValueError("the backup is of a different mouse model")
+    changed = [a for a in range(0, SETTINGS_SIZE, 8) if current[a:a + 8] != data[a:a + 8]]
+    for address in changed:
+        write_register(fd, address, data[address:address + 8])
+    for address in changed:
+        if read_register(fd, address, 8) != data[address:address + 8]:
+            raise OSError("the mouse didn't take the backup; nothing was saved")
+    if changed:
+        commit(fd)
+    return len(changed)
+
+
+# Everything that saves into the mouse's memory: the app backs the mouse up before the first of these.
+SAVES = {save_lighting, save_dpi, set_dpi_stage, set_dpi_buttons, restore_settings}
