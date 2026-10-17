@@ -1,0 +1,32 @@
+name: Bug report
+description: Something doesn't work as it should.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: And what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mousekit version
+      description: Bottom right of the window, or `dpkg -s mousekit`.
+  - type: input
+    id: mouse
+    attributes:
+      label: Mouse
+      placeholder: GamePro GM500W (30fa:1440)
+  - type: input
+    id: system
+    attributes:
+      label: System
+      placeholder: Kubuntu 26.10, Plasma 6.7, Wayland
+  - type: textarea
+    id: log
+    attributes:
+      label: Service log
+      description: The output of `journalctl --user -u mousekit --since -1h`
+      render: text

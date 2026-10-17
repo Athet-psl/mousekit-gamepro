@@ -1,0 +1,15 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    python3 -m compileall -q /usr/share/mousekit/mousekit || true
+    if command -v udevadm >/dev/null; then
+        udevadm control --reload || true
+        udevadm trigger --subsystem-match=input --subsystem-match=hidraw || true
+    fi
+    # Start with every graphical session; restart where it already runs (after an update).
+    systemctl --global enable mousekit.service >/dev/null 2>&1 || true
+    for user in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $2}'); do
+        systemctl --user --machine="$user@" daemon-reload >/dev/null 2>&1 || true
+        systemctl --user --machine="$user@" try-restart mousekit.service >/dev/null 2>&1 || true
+    done
+fi

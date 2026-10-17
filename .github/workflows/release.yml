@@ -1,0 +1,45 @@
+name: Release
+
+# Every push to main: run the tests, build the .deb and publish it as release v0.2.<commit count>,
+# with the messages of the commits since the previous release as its notes (the app shows them as the changelog).
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-evdev
+          python3 -m unittest discover tests
+
+      - name: Build the .deb
+        id: build
+        run: |
+          base=$(sed -n 's/^__version__ = "\([0-9]*\.[0-9]*\)\..*/\1/p' mousekit/__init__.py)
+          version="$base.$(git rev-list --count HEAD)"
+          packaging/build-deb.sh "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          git log --reverse --format='**%s**%n%n%b' ${previous:+"$previous..HEAD"} > notes.md
+          gh release create "v$VERSION" "dist/mousekit_${VERSION}_all.deb" \
+            --title "Mousekit for GamePro $VERSION" --notes-file notes.md --target "$GITHUB_SHA"

@@ -1,0 +1,69 @@
+name: Support for a new mouse
+description: Ask Mousekit to learn the lighting, DPI or button settings of another mouse.
+title: "Support: "
+labels: ["new mouse"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Button remapping and gestures already work with any mouse. This form is for the settings stored *in* the mouse (lighting, DPI, hardware buttons), which need its protocol.
+
+        **Easiest:** in Mousekit open the mouse › **Device** › **Request support…**. It describes the mouse, records what its buttons send and opens this form filled in.
+
+        **From a terminal:** run `sudo mousekit --dump` (from a source checkout: `sudo python3 bin/mousekit --dump`), press each button when it asks, and paste the `mousekit-dump-….txt` file it writes below.
+
+        The dump only reads from the mouse: nothing is sent to it.
+  - type: input
+    id: model
+    attributes:
+      label: Mouse model
+      placeholder: GamePro GM300
+    validations:
+      required: true
+  - type: input
+    id: usb-id
+    attributes:
+      label: USB ID
+      description: On Mousekit's Device tab, or from `lsusb`.
+      placeholder: "30fa:1440"
+    validations:
+      required: true
+  - type: input
+    id: vendor-app
+    attributes:
+      label: The manufacturer's app
+      description: A link to the official settings app for this mouse, if there is one.
+  - type: checkboxes
+    id: wanted
+    attributes:
+      label: What would you like to set?
+      options:
+        - label: Lighting
+        - label: DPI
+        - label: Hardware button assignments
+        - label: Polling rate
+  - type: textarea
+    id: dump
+    attributes:
+      label: Mousekit dump
+      description: Paste the text here.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: capture
+    attributes:
+      label: USB capture of the manufacturer's app (optional, helps a lot)
+      description: |
+        With Windows and the manufacturer's app, a capture of what the app sends shows the protocol directly:
+        1. Install [Wireshark](https://www.wireshark.org/download.html) and tick **USBPcap** in its installer.
+        2. Start a capture on the USBPcap interface the mouse is on. **Don't type passwords while it runs:** it also records other USB devices on that controller, such as the keyboard.
+        3. In the app, change one thing at a time (a lighting mode, a colour, a DPI value, a button) and apply it. Note what you changed and roughly when.
+        4. Stop the capture, save it as `.pcapng`, zip it and drag it here with your notes.
+      placeholder: |
+        12:01:05 lighting mode → Breathing
+        12:01:20 DPI stage 2 → 1600
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

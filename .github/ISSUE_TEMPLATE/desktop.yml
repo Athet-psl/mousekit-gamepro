@@ -1,0 +1,28 @@
+name: Support for another desktop
+description: Ask for Mousekit on GNOME, Hyprland, Sway or another desktop.
+title: "Desktop: "
+labels: ["desktop"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Mousekit is made for KDE Plasma for now. Most of it (gestures, remapping, lighting, DPI) works below the desktop, but ready-made actions like switching desktops, the service's autostart and some settings are Plasma-specific. Tell us what you use.
+  - type: input
+    id: desktop
+    attributes:
+      label: Desktop and version
+      placeholder: GNOME 49, Wayland
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution
+      placeholder: Fedora 43
+  - type: textarea
+    id: wanted
+    attributes:
+      label: What would you like to work
+      description: For example, which actions you'd put on mouse buttons and gestures.
+    validations:
+      required: true
