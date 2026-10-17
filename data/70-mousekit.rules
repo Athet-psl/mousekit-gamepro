@@ -1,0 +1,10 @@
+# Mousekit for GamePro: give the logged-in user (not the "input" group) access to mice.
+
+# Any mouse, so its buttons can be remapped (not touchpads, not anything that is also a keyboard).
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_MOUSE}=="1", ENV{ID_INPUT_TOUCHPAD}!="1", ENV{ID_INPUT_KEYBOARD}!="1", TAG+="uaccess"
+
+# Mice on Instant (USB 30fa) chips, like the GamePro GM500W: the vendor channel for lighting and DPI.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="30fa", TAG+="uaccess"
+
+# GamePro GM500W: all its input interfaces, including the keyboard one its programmable buttons use.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{idVendor}=="30fa", ATTRS{idProduct}=="1440", TAG+="uaccess"

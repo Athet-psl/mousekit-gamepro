@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Mousekit for GamePro
+GenericName=Mouse Settings
+Comment=Lighting, DPI, buttons and gestures for GamePro and other mice
+Exec=mousekit
+Icon=input-mouse
+Categories=Settings;HardwareSettings;Qt;KDE;
+Keywords=mouse;gestures;buttons;dpi;lighting;rgb;gamepro;
