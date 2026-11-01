@@ -1,6 +1,6 @@
 """Key combinations in Qt's portable text form ("Meta+Ctrl+Left") as evdev key codes."""
 
-from evdev import ecodes as e
+from .codes import ecodes as e
 
 MODIFIERS = {
     "Ctrl": e.KEY_LEFTCTRL,

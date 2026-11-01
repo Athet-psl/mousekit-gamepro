@@ -10,7 +10,7 @@ after the hold gate.
 
 import time
 
-from evdev import ecodes as e
+from .codes import ecodes as e
 
 from .config import DEFAULT_GESTURE, DEFAULT_PRECISION, LOCKED_BUTTONS, button_config, is_held
 from .devices import BUTTON_CODES, BUTTON_NAMES

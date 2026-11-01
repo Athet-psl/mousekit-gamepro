@@ -51,8 +51,71 @@ def _event_caps(event):
     return parts
 
 
+def _collect_windows(key):
+    from . import winhid
+
+    colls = winhid.collections(key)
+    if not colls:
+        raise LookupError(f"no USB device {key} is connected")
+    model = models.identify(key)
+    lines = [
+        f"Mousekit dump: {key}",
+        f"Mousekit {__version__}, Windows {platform.version()}",
+        f"Known model: {model['name'] if model else 'no'}",
+        "",
+        f"USB: {colls[0].product_name.strip()}, bcdDevice {colls[0].version:04x}",
+        "(Windows shows HID collections, not report descriptors.)",
+    ]
+    for coll in colls:
+        ids = ", ".join(f"{kind} {' '.join(f'{i:02x}' for i in found)}"
+                        for kind, found in coll.report_ids.items() if found)
+        lines.append(f"  interface {coll.interface}, collection {coll.number or 1}: usage page 0x{coll.usage_page:04x} "
+                     f"usage 0x{coll.usage:02x}; input {coll.input_size}, output {coll.output_size}, "
+                     f"feature {coll.feature_size} bytes; report ids: {ids or 'none'}")
+    return "\n".join(lines)
+
+
+def _record_windows(key, seconds, out):
+    from . import winhid
+
+    readers, skipped = [], []
+    for coll in winhid.collections(key):
+        if not coll.input_size:
+            continue
+        try:
+            readers.append((winhid.Device(coll.path), f"col{coll.interface}.{coll.number or 1}"))
+        except OSError:
+            skipped.append(f"interface {coll.interface} collection {coll.number or 1}")  # kept by Windows
+    out(f"Recording {seconds} s." + (f" Not readable (Windows keeps them): {', '.join(skipped)}." if skipped else ""))
+    start = time.monotonic()
+    count = 0
+    try:
+        while time.monotonic() - start < seconds and count < MAX_RECORD_LINES:
+            idle = True
+            for device, name in readers:
+                try:
+                    data = device.read(0)
+                except OSError:
+                    continue
+                if data:
+                    idle = False
+                    out(f"+{time.monotonic() - start:6.3f}  {name:9} {data.hex(' ')}")
+                    count += 1
+            if idle:
+                time.sleep(0.005)
+    finally:
+        for device, _ in readers:
+            device.close()
+    if count >= MAX_RECORD_LINES:
+        out(f"(stopped after {MAX_RECORD_LINES} lines: was the mouse moving?)")
+    elif not count:
+        out("(nothing recorded)")
+
+
 def collect(key):
     """The descriptor part of the dump for mouse "vvvv:pppp"."""
+    if sys.platform == "win32":
+        return _collect_windows(key)
     usbs = usbinfo.usb_devices(key)
     if not usbs:
         raise LookupError(f"no USB device {key} is connected")
@@ -94,12 +157,16 @@ def _nodes(key):
 
 
 def can_record_raw(key):
+    if sys.platform == "win32":
+        return True  # no root on Windows: what can be read is read as the user
     hidraw, _ = _nodes(key)
     return bool(hidraw) and all(os.access(node, os.R_OK) for node in hidraw)
 
 
 def record(key, seconds, out=print):
     """Print what the mouse sends for `seconds`: raw HID reports and the input events Linux makes of them."""
+    if sys.platform == "win32":
+        return _record_windows(key, seconds, out)
     import evdev
     from evdev import ecodes as e
     hidraw, events = _nodes(key)
@@ -202,6 +269,6 @@ def main(argv=None):
         record(key, seconds, out=lambda line: (lines.append(line), print(line, flush=True)))
         text += "\n\nRecording. " + RECORD_HINT + "\n" + "\n".join(lines)
     output = Path(args.output or f"mousekit-dump-{key.replace(':', '-')}.txt")
-    output.write_text(text + "\n")
+    output.write_text(text + "\n", encoding="utf-8")
     print(f"\nWrote {output.resolve()}")
     print(f"Attach it to an issue: {updates.new_mouse_issue()}")

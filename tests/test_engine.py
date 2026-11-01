@@ -1,6 +1,6 @@
 import unittest
 
-from evdev import ecodes as e
+from mousekit.codes import ecodes as e
 
 from mousekit.engine import Engine, detect_swipe
 from mousekit import effects

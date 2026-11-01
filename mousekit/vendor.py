@@ -13,10 +13,9 @@ committed to the mouse's memory, so a replug restores its stored lighting.
 See docs/GM500W-PROTOCOL.md.
 """
 
-import fcntl
-import os
 import time
-from pathlib import Path
+
+from . import hidio
 
 VENDOR_ID = 0x30FA
 STATUS_REPORT = 0x07
@@ -26,40 +25,21 @@ DPI_REPORT = 0x06
 DPI_BUTTONS = {0xF8: "up", 0xF6: "down"}
 DPI_STAGES = {"30fa:1440": 6}  # stage count isn't in the status block; observed per model
 
-# Vendor usage page 0xFF01 declaring feature report 0x07.
-_CONFIG_PAGE = bytes([0x06, 0x01, 0xFF])
-_CONFIG_REPORT = bytes([0x85, STATUS_REPORT])
-
-
-def _hidiocgfeature(size):
-    return (3 << 30) | (size << 16) | (ord("H") << 8) | 0x07
-
-
 def find_hidraw(key):
-    """The /dev/hidrawN carrying the vendor config channel of mouse "vvvv:pppp", if accessible."""
-    vendor, product = (int(part, 16) for part in key.split(":"))
-    if vendor != VENDOR_ID:
-        return None
-    wanted = f"{vendor:04X}:{product:04X}"
-    for entry in sorted(Path("/sys/class/hidraw").glob("hidraw*")):
-        device = entry.resolve() / "device"
-        if wanted not in device.resolve().name:
-            continue
-        try:
-            descriptor = (device / "report_descriptor").read_bytes()
-        except OSError:
-            continue
-        node = f"/dev/{entry.name}"
-        if _CONFIG_PAGE in descriptor and _CONFIG_REPORT in descriptor and os.access(node, os.R_OK | os.W_OK):
-            return node
-    return None
+    """The vendor config channel of mouse "vvvv:pppp" (a /dev/hidrawN, or a HID path on Windows), if accessible."""
+    return hidio.find(key, VENDOR_ID)
+
+
+def open_channel(node, inputs=True):
+    """An open hidio.Channel to `node`; the `fd` every function below takes.
+
+    inputs=False skips the input reports (Windows opens those as separate devices).
+    """
+    return hidio.Channel(node, inputs)
 
 
 def read_status(fd):
-    buf = bytearray(STATUS_SIZE)
-    buf[0] = STATUS_REPORT
-    size = fcntl.ioctl(fd, _hidiocgfeature(STATUS_SIZE), buf, True)
-    return bytes(buf[:size])
+    return fd.get_feature(STATUS_REPORT, STATUS_SIZE)
 
 
 LED_BYTE = 8  # (mode << 4) | speed of the mode the mouse is showing
@@ -74,13 +54,9 @@ def lighting(status):
     return status[LED_BYTE] >> 4, status[LED_BYTE] & 0x0F
 
 
-def _hidiocsfeature(size):
-    return (3 << 30) | (size << 16) | (ord("H") << 8) | 0x06
-
-
 def send(fd, packet, delay=0.002):
-    fcntl.ioctl(fd, _hidiocsfeature(len(packet)), bytes(packet))
-    time.sleep(delay)  # the vendor app waits 2 ms between reports
+    fd.set_feature(bytes(packet))
+    hidio.sleep(delay)  # the vendor app waits 2 ms between reports
 
 
 def _register_packet(flags, index, address, length):

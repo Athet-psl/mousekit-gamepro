@@ -20,7 +20,7 @@ from PyQt6.QtGui import (
     QColor, QConicalGradient, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon,
     QKeySequence, QPainter, QPalette, QPen, QPixmap, QRadialGradient,
 )
-from PyQt6.QtNetwork import QLocalSocket, QNetworkAccessManager, QNetworkReply, QNetworkRequest
+from PyQt6.QtNetwork import QLocalSocket, QNetworkAccessManager, QNetworkReply, QNetworkRequest, QTcpSocket
 from PyQt6.QtWidgets import (
     QAbstractButton, QApplication, QButtonGroup, QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QKeySequenceEdit, QLabel, QLineEdit, QMainWindow,
@@ -33,11 +33,13 @@ from .drawing import LED_MODES, SINGLE_COLOUR_MODES, Lighting, art_for
 from .config import DEFAULT_ACTION, LOCKED_BUTTONS, SWIPE_DIRECTIONS, WHEEL_DIRECTIONS
 from .keys import parse_combo
 from .presets import (
-    BUTTON_LABELS, PRESET_GROUPS, SWIPE_LABELS, SWIPE_NAMES, WHEEL_NAMES, action_icon, action_label,
+    BUTTON_LABELS, DPI_DEFAULTS, PRESET_GROUPS, SWIPE_LABELS, SWIPE_NAMES, WHEEL_NAMES, action_icon, action_label,
 )
 
 APP_NAME = "Mousekit for GamePro"
+WINDOWS = sys.platform == "win32"
 SERVICE = "mousekit.service"
+ASSETS = Path(__file__).resolve().parent / "assets"
 UDEV_HINT = ("echo 'SUBSYSTEM==\"input\", KERNEL==\"event*\", ENV{ID_INPUT_MOUSE}==\"1\", "
              "ENV{ID_INPUT_TOUCHPAD}!=\"1\", ENV{ID_INPUT_KEYBOARD}!=\"1\", TAG+=\"uaccess\"' "
              "| sudo tee /etc/udev/rules.d/70-mousekit.rules && sudo udevadm control --reload && "
@@ -67,6 +69,58 @@ def load_kde_catalog():
 
 def systemctl(*args):
     return subprocess.run(["systemctl", "--user", *args], capture_output=True, text=True)
+
+
+# The service: a systemd user unit on Linux, a background process started at sign-in on Windows.
+
+def service_running():
+    if WINDOWS:
+        from . import winservice
+        return winservice.is_running()
+    return systemctl("is-active", SERVICE).stdout.strip() == "active"
+
+
+def service_start():
+    if WINDOWS:
+        from . import winservice
+        winservice.start()
+    else:
+        systemctl("enable", "--now", SERVICE)
+
+
+def service_restart(only_if_running=False):
+    if WINDOWS:
+        from . import winservice
+        if not only_if_running or winservice.is_running():
+            winservice.restart()
+    else:
+        systemctl("try-restart" if only_if_running else "restart", SERVICE)
+
+
+# Icons: the desktop's theme on Linux; on Windows Qt only knows some names, so others get a near one.
+ICON_FALLBACKS = {
+    "crosshairs": "zoom-in", "dialog-cancel": "process-stop", "kde": "input-keyboard",
+    "microphone-sensitivity-muted": "audio-input-microphone", "preferences-system": "computer",
+    "transform-move": "zoom-fit-best", "view-app-grid": "view-restore", "view-grid": "view-restore",
+    "virtual-desktops": "video-display", "window": "window-new", "window-duplicate": "window-new",
+    "window-maximize": "view-fullscreen", "window-minimize": "go-down",
+}
+
+
+def theme_icon(name):
+    if not name:
+        return QIcon()
+    icon = QIcon.fromTheme(name)
+    if icon.isNull() and name in ICON_FALLBACKS:
+        icon = QIcon.fromTheme(ICON_FALLBACKS[name])
+    return icon
+
+
+def app_icon():
+    icon = QIcon() if WINDOWS else QIcon.fromTheme("input-mouse")
+    if icon.isNull() and (ASSETS / "mousekit.png").exists():
+        icon = QIcon(str(ASSETS / "mousekit.png"))
+    return icon
 
 
 # Theme
@@ -261,7 +315,7 @@ class Card(QFrame):
         layout.addLayout(row)
 
     def set_value(self, icon, text, empty=False):
-        self.icon.setPixmap(QIcon.fromTheme(icon).pixmap(20, 20))
+        self.icon.setPixmap(theme_icon(icon).pixmap(20, 20))
         room = self.width() - 14 - 12 - 20 - 9 - 9 - 14
         self.value.setText(QFontMetrics(self.value.font()).elidedText(text, Qt.TextElideMode.ElideRight, room))
         self.setToolTip(text if self.value.text() != text else "")
@@ -414,27 +468,28 @@ class ActionTile(Card):
         window = self.window()  # parent menus/dialogs outside the styled tree
         menu = QMenu(window)
         if self.role == "click":
-            menu.addAction(QIcon.fromTheme("input-mouse"), "Default", lambda: self._set(dict(DEFAULT_ACTION)))
-            menu.addAction(QIcon.fromTheme("dialog-cancel"), "Nothing", lambda: self._set({"type": "disabled"}))
+            menu.addAction(theme_icon("input-mouse"), "Default", lambda: self._set(dict(DEFAULT_ACTION)))
+            menu.addAction(theme_icon("dialog-cancel"), "Nothing", lambda: self._set({"type": "disabled"}))
         else:
-            menu.addAction(QIcon.fromTheme("edit-clear"), "Not set", lambda: self._set(None))
+            menu.addAction(theme_icon("edit-clear"), "Not set", lambda: self._set(None))
         menu.addSeparator()
         for group, icon, presets in PRESET_GROUPS:
-            sub = menu.addMenu(QIcon.fromTheme(icon), group)
+            sub = menu.addMenu(theme_icon(icon), group)
             for label, preset, item_icon in presets:
-                sub.addAction(QIcon.fromTheme(item_icon), label, lambda p=preset: self._set(dict(p)))
-        sub = menu.addMenu(QIcon.fromTheme("input-mouse"), "Mouse button")
+                sub.addAction(theme_icon(item_icon), label, lambda p=preset: self._set(dict(p)))
+        sub = menu.addMenu(theme_icon("input-mouse"), "Mouse button")
         for name, label in BUTTON_LABELS.items():
             if name != self.button_name:
                 sub.addAction(label, lambda n=name: self._set({"type": "button", "button": n}))
         if self.role == "click":
-            precision = menu.addAction(QIcon.fromTheme("crosshairs"), "Precision mode (while held)",
+            precision = menu.addAction(theme_icon("crosshairs"), "Precision mode (while held)",
                                        lambda: self._set({"type": "precision"}))
             precision.setEnabled(self.allow_precision)
         menu.addSeparator()
-        menu.addAction(QIcon.fromTheme("input-keyboard"), "Key combination…", self._pick_keys)
-        menu.addAction(QIcon.fromTheme("kde"), "Any KDE action…", self._pick_kde)
-        menu.addAction(QIcon.fromTheme("utilities-terminal"), "Command…", self._pick_command)
+        menu.addAction(theme_icon("input-keyboard"), "Key combination…", self._pick_keys)
+        if not WINDOWS:
+            menu.addAction(theme_icon("kde"), "Any KDE action…", self._pick_kde)
+        menu.addAction(theme_icon("utilities-terminal"), "Command…", self._pick_command)
         menu.exec(self.mapToGlobal(QPoint(0, self.height() + 2)))
 
     def _pick_keys(self):
@@ -583,27 +638,34 @@ class VendorChannel(QObject):
             return None
 
     def _open(self, node):
-        fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
+        fd = vendor.open_channel(node)
         try:
             stage, stages = vendor.read_dpi(fd)
             led = vendor.lighting(vendor.read_status(fd))
         except OSError:
-            os.close(fd)
+            fd.close()
             raise
         self.fd = fd
         self.stage, self.stages = stage, stages or self.stages
         self.led = led
-        self.notifier = QSocketNotifier(fd, QSocketNotifier.Type.Read, self)
-        self.notifier.activated.connect(self._readable)
+        if fd.fileno() is not None:
+            self.notifier = QSocketNotifier(fd.fileno(), QSocketNotifier.Type.Read, self)
+            self.notifier.activated.connect(self._readable)
+        else:  # Windows: Qt can't watch HID handles, so they're polled
+            self.notifier = QTimer(self, interval=15, timeout=self._readable)
+            self.notifier.start()
 
     def _close(self):
         if self.notifier is not None:
-            self.notifier.setEnabled(False)
+            if isinstance(self.notifier, QTimer):
+                self.notifier.stop()
+            else:
+                self.notifier.setEnabled(False)
             self.notifier.deleteLater()
             self.notifier = None
         if self.fd is not None:
             try:
-                os.close(self.fd)
+                self.fd.close()
             except OSError:
                 pass
             self.fd = None
@@ -679,11 +741,11 @@ class VendorChannel(QObject):
     def _readable(self):
         while self.fd is not None:
             try:
-                report = os.read(self.fd, 64)
-            except BlockingIOError:
-                return
+                report = self.fd.read_nowait()
             except OSError:
                 self._close()
+                return
+            if not report:
                 return
             if vendor.is_key_press(report):
                 self.key_pressed.emit()
@@ -772,7 +834,7 @@ class ButtonEditor(QWidget):
         middle = QHBoxLayout()
         middle.setSpacing(gap)
         hub_icon = QLabel()
-        hub_icon.setPixmap(QIcon.fromTheme("transform-move").pixmap(28, 28))
+        hub_icon.setPixmap(theme_icon("transform-move").pixmap(28, 28))
         hub_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hub_icon.setFixedWidth(hub)
         middle.addWidget(self.swipe["left"])
@@ -1179,10 +1241,16 @@ class PointerTab(QWidget):
         kde = QPushButton("Open…")
         kde.setObjectName("outline")
         kde.setCursor(Qt.CursorShape.PointingHandCursor)
-        kde.clicked.connect(lambda: subprocess.Popen(["systemsettings", "kcm_mouse"]))
         system = SettingsPanel()
-        system.add_row("Speed, acceleration and scrolling",
-                       "Set per mouse in KDE System Settings; Mousekit doesn't change them.", kde)
+        if WINDOWS:
+            kde.clicked.connect(lambda: QDesktopServices.openUrl(QUrl("ms-settings:mousetouchpad")))
+            system.add_row("Speed, acceleration and scrolling",
+                           "Set in Windows Settings › Bluetooth & devices › Mouse; Mousekit doesn't change them.",
+                           kde)
+        else:
+            kde.clicked.connect(lambda: subprocess.Popen(["systemsettings", "kcm_mouse"]))
+            system.add_row("Speed, acceleration and scrolling",
+                           "Set per mouse in KDE System Settings; Mousekit doesn't change them.", kde)
         panels = [gestures, precision, system]
         if channel is not None:
             panels.insert(0, DpiPanel(app, channel))
@@ -1264,7 +1332,10 @@ class DeviceTab(QWidget):
                            "To let Mousekit manage any mouse, run this once in a terminal:", below=cmd)
             panels.append(access)
         about = SettingsPanel()
-        for title, value in (("System name", info.name), ("USB ID", info.key), ("Device", info.node)):
+        node = info.node
+        if WINDOWS:  # \\?\hid#vid_30fa&pid_1440&mi_00#8&13d70af&0&0000#{guid} -> HID\VID_30FA&PID_1440&MI_00
+            node = "HID\\" + node.split("#")[1].upper() if node.count("#") >= 2 else node
+        for title, value in (("System name", info.name), ("USB ID", info.key), ("Device", node)):
             label = dim_label(value, 0.95)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             about.add_row(title, "", label)
@@ -1733,8 +1804,8 @@ class DevicePage(QWidget):
             return False
         buttons = self.profile["buttons"]
         if as_keys and "DPI_UP" not in buttons and "DPI_DOWN" not in buttons:
-            buttons["DPI_UP"] = {"click": {"type": "shortcut", "component": "kwin", "name": "Switch One Desktop to the Right"}}
-            buttons["DPI_DOWN"] = {"click": {"type": "shortcut", "component": "kwin", "name": "Switch One Desktop to the Left"}}
+            for name, action in DPI_DEFAULTS.items():
+                buttons[name] = {"click": dict(action)}
         self.hw = self._read_hw()
         index = self.stack.indexOf(self.buttons_tab)
         old = self.buttons_tab
@@ -1891,7 +1962,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.setWindowIcon(QIcon.fromTheme("input-mouse"))
+        self.setWindowIcon(app_icon())
         self.resize(1180, 800)
         self.setMinimumSize(1000, 700)
         self.theme = Theme()
@@ -1920,7 +1991,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.footer)
         self.setCentralWidget(root)
 
-        self.socket = QLocalSocket(self)
+        self.socket = QTcpSocket(self) if WINDOWS else QLocalSocket(self)
+        if WINDOWS:
+            self.socket.connected.connect(self._authenticate)
         self.socket.readyRead.connect(self._read_socket)
         self.socket.disconnected.connect(self._socket_lost)
         self.socket.errorOccurred.connect(lambda *_: self._socket_lost())
@@ -2050,7 +2123,7 @@ class MainWindow(QMainWindow):
     # Service
 
     def _refresh_service(self):
-        self.service_active = systemctl("is-active", SERVICE).stdout.strip() == "active"
+        self.service_active = service_running()
         color = self.theme.green if self.service_active else self.theme.orange
         text = "Service running" if self.service_active else "Service stopped"
         self.footer.status.setText(f'<span style="color:{color}">●</span>&nbsp;{text}')
@@ -2058,20 +2131,35 @@ class MainWindow(QMainWindow):
 
     def service_action(self):
         if self.service_active:
-            systemctl("restart", SERVICE)
+            service_restart()
         else:
-            systemctl("enable", "--now", SERVICE)
+            service_start()
         QTimer.singleShot(800, self._refresh_service)
+        QTimer.singleShot(1500, self._connect)
 
     # Live events
 
     def _connect(self):
-        if self.socket.state() == QLocalSocket.LocalSocketState.UnconnectedState:
+        if WINDOWS:
+            from . import winservice
+            info = winservice.connection_info()
+            if info is None or not winservice.is_running():
+                self.reconnect_timer.start()
+                return
+            if self.socket.state() == QTcpSocket.SocketState.UnconnectedState:
+                self.socket.connectToHost("127.0.0.1", info[0])
+        elif self.socket.state() == QLocalSocket.LocalSocketState.UnconnectedState:
             self.socket.connectToServer(str(config.SOCKET_PATH))
         if self.socket.waitForConnected(200):
             self.reconnect_timer.stop()
         else:
             self.reconnect_timer.start()
+
+    def _authenticate(self):
+        from . import winservice
+        info = winservice.connection_info()
+        if info:
+            self.socket.write(f"{info[1]}\n".encode())
 
     def _socket_lost(self):
         self.managed = set()
@@ -2154,6 +2242,8 @@ class UpdateChecker(QObject):
             self.done.emit([], [], "GitHub sent something unexpected")
             return
         self.newer = updates.newer_releases(releases)
+        if WINDOWS:  # releases without an installer (older ones had only the .deb) aren't updates here
+            self.newer = [release for release in self.newer if updates.setup_asset(release)]
         self.done.emit(self.newer, updates.recent_releases(releases), "")
 
 
@@ -2167,13 +2257,13 @@ class AboutDialog(QDialog):
         self.setMinimumSize(600, 560)
 
         icon = QLabel()
-        icon.setPixmap(QIcon.fromTheme("input-mouse").pixmap(64, 64))
+        icon.setPixmap(theme_icon("input-mouse").pixmap(64, 64))
         title = QLabel(f"<span style='font-size:18pt; font-weight:600'>{APP_NAME}</span><br>Version {__version__}")
         header = QHBoxLayout()
         header.addWidget(icon)
         header.addWidget(title, 1)
         about = QLabel(
-            "Mouse settings for KDE Plasma: lighting, DPI and buttons of GamePro mice, "
+            f"Mouse settings for {'Windows' if WINDOWS else 'KDE Plasma'}: lighting, DPI and buttons of GamePro mice, "
             "plus gestures and button remapping for any mouse.<br><br>"
             f"Author: <a href='{updates.AUTHOR_URL}'>{__author__}</a>  ·  "
             f"<a href='{updates.HOMEPAGE}'>Source code</a>  ·  MIT license<br>"
@@ -2239,7 +2329,7 @@ class AboutDialog(QDialog):
             self.notes.setMarkdown("## Recent changes\n\n" + updates.changelog(recent) if recent else "")
             return
         version = updates.release_version(newer[0])
-        if updates.installed_from_package() and updates.deb_asset(newer[0]):
+        if updates.installed_from_package() and updates.package_asset(newer[0]):
             self.status.setText(f"<b>Version {version} is available.</b>")
             self.install_button.show()
             self.install_button.setEnabled(True)
@@ -2249,7 +2339,7 @@ class AboutDialog(QDialog):
         self.notes.setMarkdown("## What's new\n\n" + updates.changelog(newer))
 
     def _install(self):
-        name, url, digest = updates.deb_asset(self.newer[0])
+        name, url, digest = updates.package_asset(self.newer[0])
         self.install_button.setEnabled(False)
         self.check_button.setEnabled(False)
         self.status.setText("Downloading…")
@@ -2278,10 +2368,22 @@ class AboutDialog(QDialog):
             self.package.unlink()
             self._failed("The download is damaged (its checksum doesn't match). Try again.")
             return
+        if WINDOWS:
+            self._install_windows()
+            return
         self.status.setText("Installing… enter your password when asked.")
         self.process = QProcess(self)
         self.process.finished.connect(self._installed)
         self.process.start("pkexec", ["/usr/bin/apt-get", "install", "-y", str(self.package)])
+
+    def _install_windows(self):
+        """Run the installer: it closes Mousekit, updates it and starts it again (with --about)."""
+        self.status.setText("Installing… Mousekit restarts when it's done.")
+        if not QProcess.startDetached(str(self.package), ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                                                           "/CLOSEAPPLICATIONS", "/UPDATE=1"]):
+            self._failed(f"Couldn't start the installer. Run it yourself: {self.package}")
+            return
+        QTimer.singleShot(300, QApplication.quit)
 
     def _installed(self, code, _status=None):
         if code in (126, 127):
@@ -2291,7 +2393,7 @@ class AboutDialog(QDialog):
             self._failed(f"Installation failed. Install it from a terminal: sudo apt install {self.package}")
             return
         self.status.setText("Updated. Restarting Mousekit…")
-        systemctl("try-restart", SERVICE)
+        service_restart(only_if_running=True)
         QProcess.startDetached("/usr/bin/mousekit", ["--about"])
         QTimer.singleShot(300, QApplication.quit)
 
@@ -2356,6 +2458,9 @@ class SupportDialog(QDialog):
         self.text.setPlainText(text)
 
     def _record(self):
+        if WINDOWS:
+            self._record_here()
+            return
         launcher = Path(__file__).resolve().parent.parent / "bin" / "mousekit"
         args = [str(launcher), "--dump", self.info.key, "--recording-only", "--record", str(dump.RECORD_SECONDS)]
         program = sys.executable
@@ -2369,6 +2474,39 @@ class SupportDialog(QDialog):
         self.process.start(program, args)
         self.left = dump.RECORD_SECONDS
         self.started = False
+
+    def _record_here(self):
+        import threading
+
+        self.recording = []
+        self.record_button.setEnabled(False)
+        self.left = dump.RECORD_SECONDS
+        self.started = False
+        self.lines = []
+        self.reader = QTimer(self, interval=100, timeout=self._take_lines)
+        self.reader.start()
+
+        def run():
+            try:
+                dump.record(self.info.key, dump.RECORD_SECONDS, out=self.lines.append)
+            finally:
+                self.lines.append(None)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _take_lines(self):
+        while self.lines:
+            line = self.lines.pop(0)
+            if line is None:
+                self.reader.stop()
+                self._recorded(0)
+                return
+            if line.startswith("Recording ") and not self.started:
+                self.started = True
+                self.countdown.start()
+                self._tick(first=True)
+            self.recording.append(line)
+        self._show()
 
     def _output(self):
         for line in bytes(self.process.readAllStandardOutput()).decode(errors="replace").splitlines():
@@ -2418,6 +2556,11 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("mousekit")
     app.setDesktopFileName("mousekit")
+    app.setWindowIcon(app_icon())
+    if WINDOWS:
+        import ctypes
+        # Its own taskbar button and icon, not python's.
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Athet.Mousekit")
     window = MainWindow()
     window.show()
     if "--about" in sys.argv[1:]:

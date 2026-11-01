@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.parse
 import urllib.request
@@ -24,9 +25,14 @@ AUTHOR_URL = "https://github.com/Athet-psl"
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 INSTALL_ROOT = Path("/usr/share/mousekit")  # where the .deb puts the app
 CHECK_INTERVAL = 3600
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "mousekit"
+WINDOWS = sys.platform == "win32"
+if WINDOWS:
+    STATE_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "Mousekit"
+    DOWNLOAD_DIR = STATE_DIR / "downloads"
+else:
+    STATE_DIR = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state") / "mousekit"
+    DOWNLOAD_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mousekit"
 NOTIFIED_PATH = STATE_DIR / "notified-version"
-DOWNLOAD_DIR = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mousekit"
 
 
 def parse_version(text):
@@ -71,6 +77,21 @@ def deb_asset(release):
     return None
 
 
+def setup_asset(release):
+    """(file name, download URL, sha256 or None) of the release's Windows installer, or None."""
+    for asset in release.get("assets", []):
+        name = asset.get("name", "")
+        if name.startswith("mousekit-setup-") and name.endswith(".exe"):
+            digest = asset.get("digest") or ""
+            return name, asset["browser_download_url"], digest[7:] if digest.startswith("sha256:") else None
+    return None
+
+
+def package_asset(release):
+    """The release's package for this system: the installer on Windows, the .deb elsewhere."""
+    return setup_asset(release) if WINDOWS else deb_asset(release)
+
+
 def changelog(releases):
     """Markdown changelog of the given releases, in the given order."""
     parts = []
@@ -94,7 +115,10 @@ def new_mouse_issue(name="", key="", dump=""):
 
 
 def installed_from_package():
-    """True when running from the .deb, so updates can be installed; False in a source checkout."""
+    """True when running from the .deb (or the Windows installer), so updates can be installed;
+    False in a source checkout."""
+    if WINDOWS:
+        return bool(getattr(sys, "frozen", False))
     return Path(__file__).resolve().is_relative_to(INSTALL_ROOT)
 
 
@@ -127,6 +151,12 @@ def set_notified(version):
 
 def notify_update(version):
     """Desktop notification about a new version; its button opens Mousekit's About window."""
+    if WINDOWS:
+        from . import winnotify
+
+        winnotify.notify(f"Mousekit {version} is available",
+                         "Click to see what's new and install it.", winnotify.open_about)
+        return
     if not shutil.which("notify-send"):
         return
     proc = subprocess.Popen(

@@ -1,14 +1,69 @@
 """Ready-made actions for the settings app, and human-readable action labels and icons."""
 
+import sys
+
 from .devices import BUTTON_NAMES
+
+WINDOWS = sys.platform == "win32"
 
 
 def shortcut(component, name):
     return {"type": "shortcut", "component": component, "name": name}
 
 
+def keys(combo):
+    return {"type": "keys", "combo": combo}
+
+
+def command(text):
+    return {"type": "command", "command": text}
+
+
+# Windows has no global-shortcut service to call, so its presets are the system's own key combinations.
+WINDOWS_GROUPS = [
+    ("Virtual desktops", "virtual-desktops", [
+        ("Desktop left", keys("Ctrl+Meta+Left"), "go-previous"),
+        ("Desktop right", keys("Ctrl+Meta+Right"), "go-next"),
+        ("Task view", keys("Meta+Tab"), "view-app-grid"),
+        ("Show desktop", keys("Meta+D"), "virtual-desktops"),
+        ("New desktop", keys("Ctrl+Meta+D"), "list-add"),
+        ("Close desktop", keys("Ctrl+Meta+F4"), "window-close"),
+    ]),
+    ("Windows", "window", [
+        ("Close window", keys("Alt+F4"), "window-close"),
+        ("Maximize window", keys("Meta+Up"), "window-maximize"),
+        ("Minimize window", keys("Meta+Down"), "window-minimize"),
+        ("Previous window", keys("Alt+Tab"), "window-duplicate"),
+        ("Window to next screen", keys("Meta+Shift+Right"), "window"),
+        ("Snap left", keys("Meta+Left"), "go-previous"),
+        ("Snap right", keys("Meta+Right"), "go-next"),
+    ]),
+    ("Media and sound", "media-playback-start", [
+        ("Play / pause", keys("Media Play"), "media-playback-start"),
+        ("Next track", keys("Media Next"), "media-skip-forward"),
+        ("Previous track", keys("Media Previous"), "media-skip-backward"),
+        ("Volume up", keys("Volume Up"), "audio-volume-high"),
+        ("Volume down", keys("Volume Down"), "audio-volume-low"),
+        ("Mute", keys("Volume Mute"), "audio-volume-muted"),
+    ]),
+    ("System", "preferences-system", [
+        ("Search", keys("Meta+S"), "system-search"),
+        ("Screenshot of an area", keys("Meta+Shift+S"), "camera-photo"),
+        ("Clipboard history", keys("Meta+V"), "edit-paste"),
+        ("File Explorer", keys("Meta+E"), "folder-open"),
+        ("Task Manager", keys("Ctrl+Shift+Esc"), "computer"),
+        ("Lock screen", command("rundll32.exe user32.dll,LockWorkStation"), "system-lock-screen"),
+    ]),
+]
+
+# The DPI buttons' actions when Mousekit takes them over.
+DPI_DEFAULTS = (
+    {"DPI_UP": keys("Ctrl+Meta+Right"), "DPI_DOWN": keys("Ctrl+Meta+Left")} if WINDOWS else
+    {"DPI_UP": shortcut("kwin", "Switch One Desktop to the Right"),
+     "DPI_DOWN": shortcut("kwin", "Switch One Desktop to the Left")})
+
 # (group, group icon, [(label, action, icon)])
-PRESET_GROUPS = [
+KDE_GROUPS = [
     ("Virtual desktops", "virtual-desktops", [
         ("Desktop left", shortcut("kwin", "Switch One Desktop to the Left"), "go-previous"),
         ("Desktop right", shortcut("kwin", "Switch One Desktop to the Right"), "go-next"),
@@ -49,6 +104,8 @@ PRESET_GROUPS = [
         ("Lock screen", shortcut("ksmserver", "Lock Session"), "system-lock-screen"),
     ]),
 ]
+
+PRESET_GROUPS = WINDOWS_GROUPS if WINDOWS else KDE_GROUPS
 
 BUTTON_LABELS = {
     "BTN_LEFT": "Left button",
@@ -92,13 +149,13 @@ def action_label(action, catalog=None):
         return "Precision mode"
     if kind == "button":
         return BUTTON_LABELS.get(action["button"], action["button"])
+    preset = _preset(action) if kind in ("keys", "command", "shortcut") else None
+    if preset:
+        return preset[0]
     if kind == "keys":
         return action["combo"]
     if kind == "command":
         return action["command"]
-    preset = _preset(action)
-    if preset:
-        return preset[0]
     return (catalog or {}).get((action["component"], action["name"])) or action["name"]
 
 
@@ -106,9 +163,11 @@ def action_icon(action):
     if not action:
         return "list-add"
     kind = action["type"]
+    preset = _preset(action) if kind in ("keys", "command", "shortcut") else None
+    if preset:
+        return preset[1]
     if kind == "shortcut":
-        preset = _preset(action)
-        return preset[1] if preset else "kde"
+        return "kde"
     return {
         "default": "input-mouse",
         "disabled": "dialog-cancel",

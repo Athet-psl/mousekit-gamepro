@@ -1,10 +1,11 @@
 # Mousekit for GamePro
 
-Lighting, DPI and button settings for **GamePro** gaming mice on Linux, plus gestures and button remapping
-for any mouse. Made for KDE Plasma on Wayland.
+Lighting, DPI and button settings for **GamePro** gaming mice on Linux and Windows, plus gestures and button
+remapping for any mouse. Made for KDE Plasma on Wayland, and for Windows 10 and 11.
 
 GamePro's own app only runs on Windows. Mousekit speaks the mouse's protocol directly (worked out from that
 app, see [docs/GM500W-PROTOCOL.md](docs/GM500W-PROTOCOL.md)) and can save the settings to the mouse itself.
+On Windows it is an alternative to that app, with Mousekit's gestures, remapping and effects.
 
 ![The Buttons tab](docs/screenshot-buttons.png)
 
@@ -31,8 +32,9 @@ Every other mouse gets button remapping and gestures. To get yours supported, se
 
 **Any mouse**
 
-- An action per button: a KDE shortcut, a key combination, a command, another mouse button, precision mode
-  (a slow pointer while held), or nothing.
+- An action per button: a KDE shortcut (Windows: ready-made actions such as switching desktops, snapping
+  windows or media keys), a key combination, a command, another mouse button, precision mode (a slow pointer
+  while held), or nothing.
 - Hold a button and swipe in four directions, or turn the wheel, as in OpenLogi. For example, hold the wheel
   and swipe left or right to switch desktops. With Plasma's per-screen desktops, that's the screen under the
   cursor.
@@ -41,6 +43,20 @@ Every other mouse gets button remapping and gestures. To get yours supported, se
 ![The Lighting tab](docs/screenshot-lighting.png)
 
 ## Install
+
+### Windows
+
+Download `mousekit-setup-….exe` from [Releases](https://github.com/Athet-psl/mousekit-gamepro/releases/latest)
+and run it. It installs for your user only, without administrator rights. Keep **Start the Mousekit service
+at sign-in** checked: the service runs button actions, gestures and lighting effects.
+
+Open **Mousekit for GamePro** from the Start menu and turn on **Manage this mouse** on the Device tab.
+Lighting, DPI, the hardware buttons and backups work even without the service.
+
+Windows 10 and 11 (64-bit). Mousekit and GamePro's own app both talk to the mouse, so close the GamePro app
+while you use Mousekit.
+
+### Kubuntu and other Linux with KDE Plasma
 
 Download `mousekit_…_all.deb` from [Releases](https://github.com/Athet-psl/mousekit-gamepro/releases/latest)
 and open it: on Kubuntu a double click opens it in Discover, where you press **Install**. Or from a terminal:
@@ -94,6 +110,8 @@ that, but nothing is saved to them until their model is verified.
 
 ## How it works
 
+On Linux:
+
 - `mousekitd` runs as a systemd user service. It takes over the mice you enable (an evdev grab) and replays
   them through a virtual device with the same USB IDs, applying actions and gestures on the way. Shortcuts go
   through KDE's kglobalaccel over D-Bus. For the GM500W it also talks to the mouse's vendor HID interface,
@@ -104,6 +122,21 @@ that, but nothing is saved to them until their model is verified.
   nor root is needed.
 - Every write to the mouse's memory is read back and checked before it's saved, and the mouse is backed up
   before Mousekit's first change to it.
+
+On Windows:
+
+- The mouse's vendor channel is the same HID protocol, through `hid.dll` (`mousekit/winhid.py`). Windows
+  shows each HID collection as its own device, so feature reports and input reports go to different ones.
+- `mousekitd.exe` runs in the background for the signed-in user, started at sign-in from the registry's Run
+  key (the installer's checkbox, or **Start** in the app). Windows has no exclusive grab, so a low-level
+  mouse hook sees button and wheel events first: what a managed mouse's settings change is held back and
+  replayed with `SendInput`, everything else passes untouched. Raw input tells which mouse moved last (so
+  other mice and touchpads are left alone) and gives gestures their motion. Precision mode lowers the
+  pointer speed while held.
+- The GM500W's programmed buttons (Fire, Forward, DPI) send media keys. With an action set in Mousekit, the
+  matching key is held back for a moment: dropped if the mouse sent it, let through if a keyboard did.
+- Settings live in `%APPDATA%\Mousekit\config.json`, backups in `%APPDATA%\Mousekit\backups`, the
+  service's log in `%LOCALAPPDATA%\Mousekit\service.log`.
 
 ## Issues and requests
 
@@ -119,7 +152,15 @@ python3 -m unittest discover tests
 packaging/build-deb.sh 0.2.0      # builds dist/mousekit_0.2.0_all.deb
 ```
 
-Every push to `main` runs the tests, builds the .deb and publishes it as release `v0.2.<commit count>`. The
+On Windows, from source (`python bin\mousekit`, `python bin\mousekitd`) or built:
+
+```powershell
+python -m pip install PyQt6 pyinstaller
+packaging\windows\build.ps1 -Version 0.2.0   # dist\Mousekit\, and dist\mousekit-setup-0.2.0.exe with Inno Setup 6
+```
+
+Every push to `main` runs the tests, builds the .deb and publishes it as release `v0.2.<commit count>`; a
+Windows job then tests on Windows and adds the installer to the release. The
 release notes are the messages of the commits since the previous release, and the app shows them as the
 changelog.
 
