@@ -22,7 +22,9 @@ def _read(path):
 
 
 def usb_devices(key):
-    """sysfs dirs of the connected USB devices with id "vvvv:pppp"."""
+    """sysfs dirs of the connected USB devices with id "vvvv:pppp" (none where there is no sysfs)."""
+    if not USB_DEVICES.is_dir():
+        return []
     return [d for d in sorted(USB_DEVICES.iterdir())
             if (d / "idVendor").exists() and f"{_read(d / 'idVendor')}:{_read(d / 'idProduct')}" == key]
 

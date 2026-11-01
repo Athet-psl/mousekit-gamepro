@@ -4,6 +4,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
-from mousekit.daemon import main
+if sys.platform == "win32":
+    from mousekit.windaemon import main
+else:
+    from mousekit.daemon import main
 
 main()

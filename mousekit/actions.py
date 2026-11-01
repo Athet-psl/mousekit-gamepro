@@ -3,12 +3,13 @@
 import logging
 import queue
 import subprocess
+import sys
 import threading
 
-import evdev
-from evdev import ecodes as e
-
+from .codes import ecodes as e
 from .keys import ALL_KEY_CODES, parse_combo
+
+WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger("mousekit")
 
@@ -54,6 +55,7 @@ class ActionRunner:
             log.warning("skipping key action: %s", err)
             return
         if self._keyboard is None:
+            import evdev
             self._keyboard = evdev.UInput({e.EV_KEY: ALL_KEY_CODES}, name="Mousekit keys")
         for code in codes if value else reversed(codes):
             self._keyboard.write(e.EV_KEY, code, value)
@@ -89,3 +91,67 @@ def component_paths(bus):
         props = dbus.Interface(bus.get_object(KGLOBALACCEL, path), "org.freedesktop.DBus.Properties")
         paths[str(props.Get(COMPONENT_IFACE, "uniqueName"))] = str(path)
     return paths
+
+
+class WindowsActionRunner:
+    """Actions on Windows: keys through SendInput, commands through the shell.
+
+    Called from the input hook, which must return at once, so everything runs
+    in order on a worker thread. KDE shortcuts don't exist here: Windows
+    presets are key combinations.
+    """
+
+    def __init__(self):
+        self._queue = queue.Queue()
+        threading.Thread(target=self._worker, daemon=True, name="actions").start()
+
+    def close(self):
+        self._queue.put(None)
+
+    def tap(self, action):
+        kind = action["type"]
+        if kind == "keys":
+            self.press(action)
+            self.release(action)
+        elif kind == "command":
+            self._queue.put(("command", action["command"]))
+        elif kind == "shortcut":
+            log.warning("KDE shortcut %s/%s isn't available on Windows", action.get("component"), action.get("name"))
+
+    def press(self, action):
+        self._keys(action, True)
+
+    def release(self, action):
+        self._keys(action, False)
+
+    def run(self, func, *args):
+        """Anything else to do in order with the actions (e.g. injecting mouse buttons)."""
+        self._queue.put(("call", (func, args)))
+
+    def _keys(self, action, down):
+        try:
+            codes = parse_combo(action.get("combo", ""))
+        except ValueError as err:
+            log.warning("skipping key action: %s", err)
+            return
+        self._queue.put(("keys", (codes, down)))
+
+    def _worker(self):
+        from . import winhook
+
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            kind, data = item
+            try:
+                if kind == "keys":
+                    winhook.send_keys(*data)
+                elif kind == "call":
+                    data[0](*data[1])
+                elif kind == "command":
+                    subprocess.Popen(data, shell=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL,
+                                     creationflags=subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+            except Exception as err:  # noqa: BLE001 - a failed action must not kill the worker
+                log.warning("action failed: %s", err)

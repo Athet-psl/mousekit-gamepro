@@ -7,13 +7,17 @@ mouse, Mousekit keeps one automatically in BACKUP_DIR.
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
 from . import __version__, models, usbinfo
 
 FORMAT = 1
-BACKUP_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "mousekit" / "backups"
+if sys.platform == "win32":
+    BACKUP_DIR = Path(os.environ.get("APPDATA") or Path.home() / "AppData/Roaming") / "Mousekit" / "backups"
+else:
+    BACKUP_DIR = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "mousekit" / "backups"
 
 
 def make(key, settings):
@@ -33,14 +37,14 @@ def save(path, backup):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(backup, indent=2) + "\n")
+    tmp.write_text(json.dumps(backup, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
 def load(path, key, size):
     """The backup at `path` if it's a backup of mouse `key`; raises ValueError otherwise."""
     try:
-        backup = json.loads(Path(path).read_text())
+        backup = json.loads(Path(path).read_text(encoding="utf-8"))
         settings = bytes.fromhex(backup["settings"])
     except (OSError, ValueError, KeyError, TypeError):
         raise ValueError("this isn't a Mousekit backup")

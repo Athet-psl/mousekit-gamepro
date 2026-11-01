@@ -1,10 +1,13 @@
-"""Mouse discovery through sysfs, so listing devices needs no device access."""
+"""Mouse discovery: through sysfs on Linux (no device access needed), HID collections on Windows."""
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from evdev import ecodes as e
+from .codes import ecodes as e
+
+WINDOWS = sys.platform == "win32"
 
 VIRTUAL_PREFIX = "Mousekit"
 INPUT_PROP_POINTING_STICK = 0x05
@@ -26,7 +29,7 @@ BUTTON_CODES = {name: code for code, name in BUTTON_NAMES.items()}
 class MouseInfo:
     key: str            # "vvvv:pppp", the config key
     name: str
-    node: str           # /dev/input/eventN
+    node: str           # /dev/input/eventN; on Windows the mouse collection's HID path
     buttons: list = field(default_factory=list)  # BUTTON_NAMES values
     accessible: bool = False
 
@@ -53,7 +56,7 @@ def _bits(path):
 
 
 def key_interfaces(key):
-    """Event nodes of mouse "vvvv:pppp"'s keyboard-like interfaces (media keys programmed in the mouse)."""
+    """Event nodes (Linux only) of mouse "vvvv:pppp"'s keyboard-like interfaces (media keys programmed in the mouse)."""
     nodes = []
     for event in sorted(Path("/sys/class/input").glob("event*"), key=lambda p: int(p.name[5:])):
         dev = event / "device"
@@ -68,6 +71,8 @@ def key_interfaces(key):
 
 def scan():
     """All physical mice currently connected, in event-node order."""
+    if WINDOWS:
+        return _scan_windows()
     mice = []
     for event in sorted(Path("/sys/class/input").glob("event*"), key=lambda p: int(p.name[5:])):
         dev = event / "device"
@@ -95,5 +100,31 @@ def scan():
             node=node,
             buttons=[n for c, n in BUTTON_NAMES.items() if c in keys],
             accessible=os.access(node, os.R_OK),
+        ))
+    return mice
+
+
+# Button usages 1-5 of a HID mouse, as Windows reports them.
+_HID_BUTTONS = ["BTN_LEFT", "BTN_RIGHT", "BTN_MIDDLE", "BTN_SIDE", "BTN_EXTRA"]
+
+
+def _scan_windows():
+    from . import winhid
+
+    mice = []
+    for coll in winhid.collections():
+        if (coll.usage_page, coll.usage) != (0x01, 0x02):
+            continue
+        path = coll.path.lower()
+        # USB ("hid#vid_...") and Bluetooth ("..._vid&...") mice only: I2C pointers are the
+        # laptop's touchpad, which Mousekit never manages.
+        if "hid#vid_" not in path and "_vid&" not in path:
+            continue
+        mice.append(MouseInfo(
+            key=coll.key,
+            name=coll.product_name.strip() or "USB mouse",
+            node=coll.path,
+            buttons=_HID_BUTTONS[:max(3, min(5, coll.buttons))],
+            accessible=True,
         ))
     return mice

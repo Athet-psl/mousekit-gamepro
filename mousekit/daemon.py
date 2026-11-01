@@ -15,14 +15,14 @@ import socket
 import sys
 import threading
 import time
-from collections import deque
 
 import evdev
 from evdev import ecodes as e
 
-from . import config, devices, effects, updates, vendor
+from . import config, devices, updates, vendor
 from .actions import ActionRunner
 from .engine import Engine
+from .lightstream import EffectRunner, apply_once
 
 log = logging.getLogger("mousekit")
 
@@ -67,60 +67,6 @@ class Mirror:
 
     def close(self):
         self.uinput.close()
-
-
-class EffectRunner:
-    """Streams one of Mousekit's own lighting effects into a mouse's DPI colour slots."""
-
-    def __init__(self, key, node, light):
-        self.key = key
-        self.node = node
-        self.light = light
-        self.fd = os.open(node, os.O_RDWR | os.O_NONBLOCK)
-        self.start = time.monotonic()
-        self.clicks = deque(maxlen=16)
-        self.sent = None
-        self.next_frame = 0.0
-        vendor.send(self.fd, vendor.stream_start_packet())
-
-    def tick(self, now):
-        clicks = [when - self.start for when in self.clicks]
-        rgb = effects.to_device(effects.colour(self.light, now - self.start, clicks))
-        packets = vendor.slot_packets(rgb, effects.SLOTS)
-        if packets != self.sent:  # every slot, so a DPI change keeps the effect's colour
-            for packet in packets:
-                vendor.send(self.fd, packet, delay=0.0005)
-            self.sent = packets
-        self.next_frame = now + 1 / effects.FPS
-
-    def fileno(self):
-        return self.fd
-
-    def readable(self):
-        """Input reports on the vendor interface: buttons programmed as media keys, DPI buttons."""
-        while True:
-            try:
-                report = os.read(self.fd, 64)
-            except BlockingIOError:
-                return
-            dpi = vendor.parse_input(report)
-            if vendor.is_key_press(report) or (dpi and dpi[0] == "dpi-press"):
-                self.click()
-
-    def refresh(self):
-        """Put the mouse back into the streamed mode and resend the colour."""
-        vendor.send(self.fd, vendor.stream_start_packet())
-        self.sent = None
-        self.next_frame = 0.0
-
-    def click(self, kind="button"):
-        if kind == "scroll" and not self.light.get("on_scroll", True):
-            return
-        self.clicks.append(time.monotonic())
-        self.next_frame = 0.0
-
-    def stop(self):
-        os.close(self.fd)
 
 
 # Keys the GM500W's buttons send through its keyboard interface (as programmed in the mouse) -> button names.
@@ -394,11 +340,7 @@ class Daemon:
             if node in self.lit or "mode" not in light:
                 continue
             try:
-                fd = os.open(node, os.O_RDWR)
-                try:
-                    vendor.apply_lighting(fd, light)
-                finally:
-                    os.close(fd)
+                apply_once(node, light)
             except OSError as err:
                 log.warning("cannot restore lighting on %s: %s", node, err)
                 continue
@@ -529,7 +471,7 @@ class UpdateWatcher(threading.Thread):
             except (OSError, ValueError) as err:
                 log.info("update check failed: %s", err)
                 continue
-            if not newer or not updates.deb_asset(newer[0]):
+            if not newer or not updates.package_asset(newer[0]):
                 continue
             version = updates.release_version(newer[0])
             if updates.last_notified() != version:

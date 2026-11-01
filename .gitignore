@@ -1,5 +1,8 @@
 __pycache__/
 *.pyc
 /dist/
+/build/
 *.deb
 mousekit-dump-*.txt
+/.venv/
+/mousekit/_build.py

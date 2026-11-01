@@ -1,8 +1,12 @@
+import sys
 import unittest
 
-from evdev import ecodes as e
+from mousekit.codes import ecodes as e
 
-from mousekit import daemon
+if sys.platform != "linux":
+    raise unittest.SkipTest("the Linux service needs evdev")
+
+from mousekit import daemon  # noqa: E402
 
 
 class FakeDevice:

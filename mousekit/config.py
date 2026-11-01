@@ -17,11 +17,21 @@ wheel turn consumed the hold.
 
 import json
 import os
+import sys
 from pathlib import Path
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "mousekit"
+WINDOWS = sys.platform == "win32"
+
+if WINDOWS:
+    CONFIG_DIR = Path(os.environ.get("APPDATA") or Path.home() / "AppData/Roaming") / "Mousekit"
+    LOCAL_DIR = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "Mousekit"
+    # Windows has no per-user runtime dir for a Unix socket: the service listens on 127.0.0.1 and
+    # writes its port and a secret the app must send first here.
+    SOCKET_PATH = LOCAL_DIR / "service.json"
+else:
+    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "mousekit"
+    SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "mousekit.sock"
 CONFIG_PATH = CONFIG_DIR / "config.json"
-SOCKET_PATH = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}") / "mousekit.sock"
 
 # Primary buttons always pass through untouched: remapping them can leave
 # the user without a way to click.
@@ -63,7 +73,7 @@ def normalize_profile(profile):
 
 def load(path=CONFIG_PATH):
     try:
-        data = json.loads(Path(path).read_text())
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return default_config()
     if not isinstance(data, dict):
@@ -79,7 +89,7 @@ def save(config, path=CONFIG_PATH):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n")
+    tmp.write_text(json.dumps(config, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
