@@ -28,10 +28,19 @@ class UpdatesTest(unittest.TestCase):
         self.assertEqual([r["tag_name"] for r in updates.recent_releases(releases, "0.2.9")], ["v0.2.9", "v0.2.8"])
         self.assertEqual(updates.newer_releases(releases, "0.2.10"), [])
 
-    def test_deb_asset(self):
-        r = release("v0.2.9", assets=[("notes.txt", {}), ("mousekit_0.2.9_all.deb", {"digest": "sha256:ab12"})])
-        self.assertEqual(updates.deb_asset(r), ("mousekit_0.2.9_all.deb", "https://example/mousekit_0.2.9_all.deb", "ab12"))
-        self.assertIsNone(updates.deb_asset(release("v0.2.9")))
+    def test_find_asset(self):
+        r = release("v0.2.9", assets=[("notes.txt", {}), ("mousekit_0.2.9_all.deb", {"digest": "sha256:ab12"}),
+                                      ("mousekit-0.2.9-1.noarch.rpm", {}), ("mousekit-setup-0.2.9.exe", {})])
+        self.assertEqual(updates.find_asset(r, "deb"),
+                         ("mousekit_0.2.9_all.deb", "https://example/mousekit_0.2.9_all.deb", "ab12"))
+        self.assertEqual(updates.find_asset(r, "rpm"),
+                         ("mousekit-0.2.9-1.noarch.rpm", "https://example/mousekit-0.2.9-1.noarch.rpm", None))
+        self.assertEqual(updates.setup_asset(r)[0], "mousekit-setup-0.2.9.exe")
+        self.assertIsNone(updates.find_asset(release("v0.2.9"), "rpm"))
+
+    def test_install_command(self):
+        self.assertEqual(updates.install_command("/tmp/m.rpm", "rpm"), ["/usr/bin/dnf", "install", "-y", "/tmp/m.rpm"])
+        self.assertEqual(updates.install_command("/tmp/m.deb", "deb")[0], "/usr/bin/apt-get")
 
     def test_changelog(self):
         text = updates.changelog([release("v0.2.10", "**Fix DPI**"), release("v0.2.9", "**Add lighting**")])

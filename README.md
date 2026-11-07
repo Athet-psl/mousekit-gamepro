@@ -56,13 +56,15 @@ Lighting, DPI, the hardware buttons and backups work even without the service.
 Windows 10 and 11 (64-bit). Mousekit and GamePro's own app both talk to the mouse, so close the GamePro app
 while you use Mousekit.
 
-### Kubuntu and other Linux with KDE Plasma
+### Linux with KDE Plasma (Kubuntu, Fedora and others)
 
-Download `mousekit_…_all.deb` from [Releases](https://github.com/Athet-psl/mousekit-gamepro/releases/latest)
-and open it: on Kubuntu a double click opens it in Discover, where you press **Install**. Or from a terminal:
+Download the package from [Releases](https://github.com/Athet-psl/mousekit-gamepro/releases/latest) and open
+it: `mousekit_…_all.deb` for Ubuntu and Debian (on Kubuntu a double click opens it in Discover, where you press
+**Install**), `mousekit-…noarch.rpm` for Fedora. Or from a terminal:
 
 ```sh
-sudo apt install ./mousekit_*_all.deb
+sudo apt install ./mousekit_*_all.deb       # Ubuntu, Debian
+sudo dnf install ./mousekit-*.noarch.rpm    # Fedora
 ```
 
 Either way, the packages Mousekit needs are installed with it.
@@ -70,7 +72,7 @@ Either way, the packages Mousekit needs are installed with it.
 Open **Mousekit for GamePro** from the app menu. If the service isn't running yet, press **Start** at the
 bottom left. Then turn on **Manage this mouse** on the Device tab.
 
-Mousekit is developed on Kubuntu 26.10 with Plasma 6.7 and needs Plasma 6 (the rest, `python3-evdev`,
+Mousekit is developed on Kubuntu 26.10 and Fedora 45 with Plasma 6 and needs Plasma 6 (the rest, `python3-evdev`,
 `python3-pyqt6` and `python3-dbus`, comes with the package). Other desktops aren't supported yet, see
 [Issues and requests](#issues-and-requests).
 
@@ -150,6 +152,7 @@ and say what you use.
 ```sh
 python3 -m unittest discover tests
 packaging/build-deb.sh 0.2.0      # builds dist/mousekit_0.2.0_all.deb
+packaging/build-rpm.sh 0.2.0      # builds dist/mousekit-0.2.0-1.noarch.rpm (needs rpm-build)
 ```
 
 On Windows, from source (`python bin\mousekit`, `python bin\mousekitd`) or built:
@@ -159,7 +162,8 @@ python -m pip install PyQt6 pyinstaller
 packaging\windows\build.ps1 -Version 0.2.0   # dist\Mousekit\, and dist\mousekit-setup-0.2.0.exe with Inno Setup 6
 ```
 
-Every push to `main` runs the tests, builds the .deb and publishes it as release `v0.2.<commit count>`; a
+Every push to `main` runs the tests, builds the .deb on Ubuntu and the .rpm on Fedora and publishes them as
+release `v0.2.<commit count>`; a
 Windows job then tests on Windows and adds the installer to the release. The
 release notes are the messages of the commits since the previous release, and the app shows them as the
 changelog.

@@ -1,6 +1,6 @@
 """Update checks against the project's GitHub releases.
 
-Every push to main publishes a release with the .deb attached and the commit
+Every push to main publishes a release with the .deb and .rpm attached and the commit
 message as its notes, so the changelog between two versions is the notes of
 the releases in between.
 """
@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from functools import cache
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -23,7 +24,7 @@ REPO = "Athet-psl/mousekit-gamepro"
 HOMEPAGE = f"https://github.com/{REPO}"
 AUTHOR_URL = "https://github.com/Athet-psl"
 RELEASES_API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
-INSTALL_ROOT = Path("/usr/share/mousekit")  # where the .deb puts the app
+INSTALL_ROOT = Path("/usr/share/mousekit")  # where the .deb or .rpm puts the app
 CHECK_INTERVAL = 3600
 WINDOWS = sys.platform == "win32"
 if WINDOWS:
@@ -67,29 +68,49 @@ def release_version(release):
     return release.get("tag_name", "").lstrip("v")
 
 
-def deb_asset(release):
-    """(file name, download URL, sha256 or None) of the release's .deb, or None."""
+PACKAGES = {  # package format -> (asset name prefix, suffix)
+    "deb": ("mousekit_", "_all.deb"),
+    "rpm": ("mousekit-", ".noarch.rpm"),
+    "setup": ("mousekit-setup-", ".exe"),
+}
+
+
+def find_asset(release, kind):
+    """(file name, download URL, sha256 or None) of the release's package of this format, or None."""
+    prefix, suffix = PACKAGES[kind]
     for asset in release.get("assets", []):
         name = asset.get("name", "")
-        if name.startswith("mousekit_") and name.endswith("_all.deb"):
+        if name.startswith(prefix) and name.endswith(suffix):
             digest = asset.get("digest") or ""
             return name, asset["browser_download_url"], digest[7:] if digest.startswith("sha256:") else None
     return None
 
 
 def setup_asset(release):
-    """(file name, download URL, sha256 or None) of the release's Windows installer, or None."""
-    for asset in release.get("assets", []):
-        name = asset.get("name", "")
-        if name.startswith("mousekit-setup-") and name.endswith(".exe"):
-            digest = asset.get("digest") or ""
-            return name, asset["browser_download_url"], digest[7:] if digest.startswith("sha256:") else None
-    return None
+    """The release's Windows installer, or None."""
+    return find_asset(release, "setup")
+
+
+@cache
+def package_format():
+    """How this copy was installed: "setup" on Windows, "rpm" from the .rpm, otherwise "deb"."""
+    if WINDOWS:
+        return "setup"
+    if shutil.which("rpm") and subprocess.run(["rpm", "-q", "--quiet", "mousekit"]).returncode == 0:
+        return "rpm"
+    return "deb"
 
 
 def package_asset(release):
-    """The release's package for this system: the installer on Windows, the .deb elsewhere."""
-    return setup_asset(release) if WINDOWS else deb_asset(release)
+    """The release's package for this system: the installer on Windows, the .deb or .rpm elsewhere."""
+    return find_asset(release, package_format())
+
+
+def install_command(path, kind=None):
+    """The command that installs the downloaded .deb or .rpm at `path`, run as root."""
+    if (kind or package_format()) == "rpm":
+        return ["/usr/bin/dnf", "install", "-y", str(path)]
+    return ["/usr/bin/apt-get", "install", "-y", str(path)]
 
 
 def changelog(releases):
@@ -115,7 +136,7 @@ def new_mouse_issue(name="", key="", dump=""):
 
 
 def installed_from_package():
-    """True when running from the .deb (or the Windows installer), so updates can be installed;
+    """True when running from the .deb or .rpm (or the Windows installer), so updates can be installed;
     False in a source checkout."""
     if WINDOWS:
         return bool(getattr(sys, "frozen", False))

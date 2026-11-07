@@ -2374,7 +2374,7 @@ class AboutDialog(QDialog):
         self.status.setText("Installing… enter your password when asked.")
         self.process = QProcess(self)
         self.process.finished.connect(self._installed)
-        self.process.start("pkexec", ["/usr/bin/apt-get", "install", "-y", str(self.package)])
+        self.process.start("pkexec", updates.install_command(self.package))
 
     def _install_windows(self):
         """Run the installer: it closes Mousekit, updates it and starts it again (with --about)."""
@@ -2390,7 +2390,8 @@ class AboutDialog(QDialog):
             self._failed("Installation cancelled.")
             return
         if code:
-            self._failed(f"Installation failed. Install it from a terminal: sudo apt install {self.package}")
+            command = " ".join(updates.install_command(self.package)).replace("/usr/bin/", "")
+            self._failed(f"Installation failed. Install it from a terminal: sudo {command}")
             return
         self.status.setText("Updated. Restarting Mousekit…")
         service_restart(only_if_running=True)
